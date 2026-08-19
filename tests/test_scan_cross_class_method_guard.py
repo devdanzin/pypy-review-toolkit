@@ -193,3 +193,29 @@ def test_trivial_stub_not_flagged(tmp_path):
     # field access) is.
     assert len(findings) == 1
     assert findings[0]["class_name"] == "W_StringIO"
+
+
+def test_close_w_is_exempt_from_cross_class_guard_comparison(tmp_path):
+    files = {
+        "a.py": """
+            class W_BytesIO(object):
+                def close_w(self, space):
+                    self.close()
+        """,
+        "b.py": """
+            class W_TextIOWrapper(object):
+                def close_w(self, space):
+                    self._check_closed(space)
+                    self.close()
+        """,
+    }
+    findings = _run(tmp_path, files)
+    assert findings == []
+
+
+def test_abstract_class_is_recognized_as_base_or_mixin():
+    assert scanner._is_base_or_mixin_class("W_AbstractBuffer")
+    assert scanner._is_base_or_mixin_class("W_IOBase")
+    assert scanner._is_base_or_mixin_class("W_TextIOBase")
+    assert scanner._is_base_or_mixin_class("BufferedMixin")
+    assert not scanner._is_base_or_mixin_class("W_MemoryView")

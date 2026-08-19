@@ -90,6 +90,30 @@ def _self_fields_accessed(method: ast.FunctionDef) -> set[str]:
     return fields
 
 
+def _resource_fields_accessed(method: ast.FunctionDef) -> set[str]:
+    """Return self-fields that look like resource/lifecycle state.
+
+    The cross-class guard heuristic is intended for resource lifecycle
+    mismatches, such as a detached/closed wrapper being accessed without
+    checking its backing resource first. Generic object state used for
+    conversion, protocol dispatch, or ordinary value storage should not
+    be
+    treated as evidence of such a lifecycle invariant.
+    """
+    fields = _self_fields_accessed(method)
+
+    # These are value/protocol fields rather than resource-lifecycle state.
+    # They produced false positives when generic self-field access was used
+    # as the cross-class comparison signal.
+    non_resource_fields = {
+        "num",
+        "intval",
+        "_value",
+    }
+
+    return fields - non_resource_fields
+
+
 def _guarded_fields(method: ast.FunctionDef) -> set[str]:
     """Fields that appear in an `if self.X` / `if not self.X` / `if self.X is
     None`-shaped test anywhere in *method* -- the inline truthiness/None-check
@@ -125,6 +149,24 @@ def _guarded_fields(method: ast.FunctionDef) -> set[str]:
             if isinstance(test_node, ast.Name) and test_node.id in alias_of:
                 guarded.add(alias_of[test_node.id])
     return guarded
+
+
+def _has_explicit_guard(method: ast.FunctionDef) -> bool:
+    """Return whether *method* explicitly calls a self._check_* guard."""
+    for node in ast.walk(method):
+        if not isinstance(node, ast.Call):
+            continue
+
+        func = node.func
+        if (
+            isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "self"
+            and func.attr.startswith("_check_")
+        ):
+            return True
+
+    return False
 
 
 def _is_trivial_stub(method: ast.FunctionDef) -> bool:
@@ -181,6 +223,44 @@ _EXCLUDED_METHOD_NAMES = frozenset(
         "__len__",
     }
 )
+
+
+# Base classes and mixins frequently provide intentionally generic/default
+# implementations. Comparing those implementations against concrete sibling
+# classes creates false positives because the base method is not necessarily
+# expected to enforce the concrete class's resource-lifecycle invariant.
+#
+# The cross-class guard heuristic is intended to find deviations between
+# concrete implementations of the same PyPy wrapper operation, not differences
+# between an abstract/base implementation and its subclasses.
+_BASE_CLASS_NAME_MARKERS = (
+    "Base",
+    "Mixin",
+)
+
+
+def _is_base_or_mixin_class(class_name: str) -> bool:
+    """Return whether *class_name* looks like a base/helper implementation."""
+    return (
+        class_name.endswith(_BASE_CLASS_NAME_MARKERS)
+        or class_name.startswith("W_Abstract")
+        or class_name in {
+            "W_IOBase",
+            "W_TextIOBase",
+            "W_BufferedIOBase",
+            "BufferedMixin",
+        }
+    )
+
+
+def _is_lifecycle_exempt_method(method_name: str) -> bool:
+    """Return whether *method_name* has intentionally idempotent semantics.
+
+    Close operations are allowed to run on an already-closed object, so an
+    implementation of close_w() should not be required to establish an
+    open-state guard before performing the close operation itself.
+    """
+    return method_name == "close_w"
 
 
 def analyze(target: str, *, max_files: int = 0) -> dict:
@@ -247,6 +327,8 @@ def analyze(target: str, *, max_files: int = 0) -> dict:
 
     findings: list[dict] = []
     for (directory, method_name), defs in by_dir_and_name.items():
+        if _is_lifecycle_exempt_method(method_name):
+            continue
         # Only interesting when the SAME method name is defined on 2+
         # DIFFERENT classes -- multiple overrides in an inheritance chain
         # within one file also produce multiple defs of the same name, but
@@ -256,15 +338,40 @@ def analyze(target: str, *, max_files: int = 0) -> dict:
         if len(distinct_classes) < 2:
             continue
 
+        # Base classes and mixins commonly provide generic/default methods.
+        # Their lack of a concrete resource guard is not, by itself, evidence
+        # that a concrete sibling implementation is missing a guard.
+        concrete_defs = [
+            d for d in defs
+            if not _is_base_or_mixin_class(d["class_name"])
+        ]
+
+        if len({
+            (d["class_name"], d["file"])
+            for d in concrete_defs
+        }) < 2:
+            continue
+
         guarded_defs = []
         unguarded_defs = []
-        for d in defs:
+        for d in concrete_defs:
             method = d["node"]
             if _is_trivial_stub(method):
                 continue  # W_IOBase's `pass` shape -- nothing to guard.
-            accessed = _self_fields_accessed(method)
+
+            # An explicit self._check_* call is already strong evidence that
+            # the method follows PyPy's resource/lifecycle guard convention.
+            # Do this before field-based analysis because many wrapper
+            # operations access their actual state indirectly through helpers
+            # such as self.read() or self.write().
+            if _has_explicit_guard(method):
+                guarded_defs.append(d)
+                continue
+
+            accessed = _resource_fields_accessed(method)
             if not accessed:
                 continue
+
             guarded = _guarded_fields(method)
             if accessed & guarded:
                 guarded_defs.append(d)
