@@ -64,6 +64,41 @@ def test_irrelevant_exception_name_ignored(tmp_path):
     assert findings == []
 
 
+def test_unreachable_not_implemented_is_ignored(tmp_path):
+    src = """
+        def f(self):
+            raise NotImplementedError("cannot reach")
+    """
+    f = _write(tmp_path, src)
+    findings = _check_file(f, tmp_path)
+    assert findings == []
+
+
+def test_closure_size_validation_is_ignored(tmp_path):
+    src = """
+        def initialize_frame_scopes(self):
+            if closure_size != nfreevars:
+                raise ValueError(
+                    "code object received a closure with "
+                    "an unexpected number of free variables"
+                )
+    """
+    f = _write(tmp_path, src)
+    findings = _check_file(f, tmp_path)
+    assert findings == []
+
+
+def test_other_value_error_is_still_flagged(tmp_path):
+    src = """
+        def f(self):
+            raise ValueError("some other error")
+    """
+    f = _write(tmp_path, src)
+    findings = _check_file(f, tmp_path)
+    assert len(findings) == 1
+    assert findings[0]["type"] == "interp-app-boundary-raw-exception"
+
+
 def test_count_callers_zero_for_unreferenced_function():
     source = "def fixedunpack(self, argcount):\n    raise ValueError('x')\n"
     assert _count_callers("fixedunpack", source) == 0

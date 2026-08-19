@@ -100,6 +100,39 @@ def _finding(
     }
 
 
+def _is_unreachable_not_implemented(node: ast.Raise) -> bool:
+    """Return whether *node* is an internal unreachable-code guard."""
+    call = node.exc
+    if not (
+        isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Name)
+        and call.func.id == "NotImplementedError"
+        and call.args
+        and isinstance(call.args[0], ast.Constant)
+        and call.args[0].value == "cannot reach"
+    ):
+        return False
+    return True
+
+
+def _is_closure_size_validation(node: ast.Raise) -> bool:
+    """Return whether *node* validates an incompatible closure size."""
+    call = node.exc
+    if not (
+        isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Name)
+        and call.func.id == "ValueError"
+        and call.args
+        and isinstance(call.args[0], ast.Constant)
+    ):
+        return False
+
+    return call.args[0].value == (
+        "code object received a closure with "
+        "an unexpected number of free variables"
+    )
+
+
 def _raise_kind(node: ast.Raise) -> tuple[str, str] | None:
     """Classify one ``raise`` statement. Returns (kind, name) or None if irrelevant.
 
@@ -136,6 +169,12 @@ def _check_file(path: Path, project_root: Path) -> list[dict]:
         raw_raises: list[tuple[ast.Raise, str]] = []
         for sub in ast.walk(func):
             if isinstance(sub, ast.Raise):
+                if (
+                    _is_unreachable_not_implemented(sub)
+                    or _is_closure_size_validation(sub)
+                ):
+                    continue
+
                 classified = _raise_kind(sub)
                 if classified is None:
                     continue
