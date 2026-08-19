@@ -345,8 +345,25 @@ def build_pypy_envelope(
 def main() -> None:
     target = sys.argv[1] if len(sys.argv) > 1 else "."
     discovery = discover(target)
+
     if "--slices" in sys.argv:
         discovery["review_slices"] = build_review_slices(discovery)
+
+        script_root = Path(__file__).resolve().parent
+        toolkit_root = script_root.parent.parent.parent
+        manifest_path = (
+            toolkit_root
+            / "plugins"
+            / "pypy-review-toolkit"
+            / "data"
+            / "review_slices.json"
+        )
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(
+            json.dumps(discovery, indent=2, default=str) + "\n",
+            encoding="utf-8",
+        )
+
     json.dump(discovery, sys.stdout, indent=2, default=str)
     sys.stdout.write("\n")
 

@@ -3,3 +3,6 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 .DS_Store
+
+# Generated PyPy review manifest
+plugins/pypy-review-toolkit/data/review_slices.json
