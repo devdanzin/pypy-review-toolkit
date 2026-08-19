@@ -26,6 +26,29 @@ def test_kwargs_function_is_flagged(tmp_path):
     assert findings[0]["type"] == "rpython-unbounded-kwargs"
 
 
+def test_not_rpython_function_is_not_flagged(tmp_path):
+    src = """
+        def f(**kwds):
+            \"\"\"NOT_RPYTHON\"\"\"
+            return kwds
+    """
+    f = _write(tmp_path, src)
+    findings = _check_file(f, tmp_path)
+    assert findings == []
+
+
+def test_not_rpython_module_is_not_flagged(tmp_path):
+    src = """
+        # NOT_RPYTHON
+
+        def f(**kwds):
+            return kwds
+    """
+    f = _write(tmp_path, src)
+    findings = _check_file(f, tmp_path)
+    assert findings == []
+
+
 def test_function_without_kwargs_not_flagged(tmp_path):
     src = """
         def f(a, b):
@@ -43,6 +66,20 @@ def test_eval_exec_not_flagged_at_all(tmp_path):
         def f():
             exec("x = 1")
             return eval("1 + 1")
+    """
+    f = _write(tmp_path, src)
+    findings = _check_file(f, tmp_path)
+    assert findings == []
+
+
+def test_not_rpython_decorator_is_not_flagged(tmp_path):
+    src = """
+        def not_rpython(func):
+            return func
+
+        @not_rpython
+        def f(**kwds):
+            return kwds
     """
     f = _write(tmp_path, src)
     findings = _check_file(f, tmp_path)

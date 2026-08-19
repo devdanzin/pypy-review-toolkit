@@ -48,7 +48,7 @@ from scan_common import (  # noqa: E402
     parse_common_args,
     relative_to_root,
 )
-from pypy_utils import parse_rpython_file  # noqa: E402
+from pypy_utils import find_decorators, parse_rpython_file  # noqa: E402
 from discover_pypy import build_pypy_envelope, discover  # noqa: E402
 
 
@@ -80,8 +80,38 @@ def _check_file(path: Path, project_root: Path) -> list[dict]:
     rel = relative_to_root(path, project_root)
     findings: list[dict] = []
 
+    # A module-level "# NOT_RPYTHON" marker means the whole file is
+    # intentionally outside the translated RPython surface. Comments are
+    # discarded by the AST, so inspect the original source text here.
+    module_not_rpython = any(
+        line.strip() == "# NOT_RPYTHON"
+        for line in result.source.splitlines()
+    )
+
+    if module_not_rpython:
+        return []
+
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.args.kwarg is not None:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+
+        # @not_rpython explicitly marks the function as outside the
+        # translated RPython surface.
+        if "not_rpython" in find_decorators(node):
+            continue
+
+        # A function-level NOT_RPYTHON docstring means this function is
+        # intentionally outside the translated RPython surface.
+        if (
+            node.body
+            and isinstance(node.body[0], ast.Expr)
+            and isinstance(node.body[0].value, ast.Constant)
+            and isinstance(node.body[0].value.value, str)
+            and node.body[0].value.value.strip() == "NOT_RPYTHON"
+        ):
+            continue
+
+        if node.args.kwarg is not None:
             findings.append(
                 _finding(
                     "rpython-unbounded-kwargs",
