@@ -1,0 +1,27 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "pypy-review-toolkit",
+  "version": "0.1.0",
+  "description": "Static review toolkit for PyPy's own RPython-level implementation: translated-vs-untranslated divergence, JIT immutability-contract mismatches, interp/app boundary leaks, and RPython-restriction hazards.",
+  "owner": {
+    "name": "Bhuvansh"
+  },
+  "plugins": [
+    {
+      "name": "pypy-review-toolkit",
+      "description": "Agents and commands for reviewing PyPy's RPython interpreter core, object space, and JIT for translation hazards and correctness bugs specific to how PyPy is built.",
+      "source": "./plugins/pypy-review-toolkit",
+      "version": "0.1.0",
+      "category": "code-quality",
+      "keywords": [
+        "pypy",
+        "rpython",
+        "jit",
+        "code-review",
+        "python",
+        "static-analysis",
+        "translation"
+      ]
+    }
+  ]
+}

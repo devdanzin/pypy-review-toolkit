@@ -1,0 +1,62 @@
+{
+  "source": "rpython/rlib/jit.py",
+  "decorators": {
+    "elidable": {
+      "contract": "No observable side effects; result determined purely by arguments. The JIT relies on this to cache and reorder calls.",
+      "violation_signal": "Assignment to self.*, module globals, or a call to anything not itself elidable/pure inside the decorated function."
+    },
+    "elidable_promote": {
+      "contract": "Same as elidable, plus arguments are promoted (treated as JIT-time constants) before the call.",
+      "violation_signal": "Same as elidable."
+    },
+    "unroll_safe": {
+      "contract": "Loop bound must be provably JIT-compile-time-constant/small, or risks trace explosion.",
+      "violation_signal": "Loop bound derived from len() of something not promoted, or a runtime-read field."
+    },
+    "dont_look_inside": {
+      "contract": "JIT should not trace into this function's body.",
+      "violation_signal": "Placed on a function that's on an actual hot path (reachable from a JitDriver merge point) without a comment explaining why -- sometimes deliberate, always the author's call."
+    },
+    "promote": {
+      "contract": "Argument is treated as a JIT-time constant at this call site.",
+      "violation_signal": "Promoting a value that genuinely varies at runtime causes trace explosion; promoting self on an object whose relevant fields aren't actually immutable is a correctness hazard -- see immutability-contract-mismatch-promoted."
+    },
+    "promote_string": {"contract": "String-specialized promote.", "violation_signal": "Same as promote."},
+    "promote_unicode": {"contract": "Unicode-specialized promote.", "violation_signal": "Same as promote."},
+    "loop_invariant": {
+      "contract": "Function's result is invariant across loop iterations for a given trace.",
+      "violation_signal": "Same general shape as elidable."
+    },
+    "purefunction": {
+      "contract": "Legacy name/alias-adjacent to elidable in some PyPy versions -- verify against the actual checkout's jit.py before relying on this.",
+      "violation_signal": "Same as elidable."
+    },
+    "purefunction_promote": {
+      "contract": "Combination of purefunction + promote semantics.",
+      "violation_signal": "Same as elidable + promote."
+    },
+    "isvirtual": {
+      "contract": "Query whether the JIT currently represents an object as a virtual (not yet heap-allocated).",
+      "violation_signal": "Not a correctness contract in the same sense as the others -- informational."
+    },
+    "loop_unrolling_heuristic": {
+      "contract": "Heuristic controlling whether a loop gets unrolled.",
+      "violation_signal": "n/a -- tuning, not correctness."
+    },
+    "conditional_call_elidable": {
+      "contract": "Conditional-call variant of elidable.",
+      "violation_signal": "Same as elidable."
+    }
+  },
+  "class_attributes": {
+    "_immutable_fields_": {
+      "contract": "Listed fields never change after construction. Trailing '?' (which can appear before a '[*]' list-marker suffix, e.g. 'closure?[*]') marks a field as quasi-immutable -- assigned at most once after construction, not truly const.",
+      "violation_signal": "A field listed WITHOUT the '?' marker that is reassigned in any method other than __init__. See scan_immutability_contracts.py.",
+      "marker_ordering_gotcha": "The '?' comes BEFORE '[*]' for list fields ('closure?[*]'), not after ('closure[*]?'). Getting this wrong produces false positives on already-correctly-marked fields -- see pypy_non_bugs.md."
+    },
+    "_attrs_": {
+      "contract": "Declares the full set of attributes an RPython class instance may have -- a different mechanism than _immutable_fields_, also annotator-recognized.",
+      "violation_signal": "Not currently checked by any v0.1 scanner."
+    }
+  }
+}

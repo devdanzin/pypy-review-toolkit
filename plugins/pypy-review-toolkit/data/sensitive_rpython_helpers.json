@@ -1,0 +1,37 @@
+{
+  "_comment": "Curated, not exhaustive. Each entry is a real RPython helper with a precondition its signature doesn't enforce -- calling it with an out-of-precondition value produces PyPy's generic 'SystemError: unexpected internal exception (please report a bug)' leak instead of a proper app-level exception. Seeded from danzin's fusil findings (docs/PYPY_FINDINGS_REPORT.md); grow this list from future confirmed bugs, not speculation. See design doc §9.1.",
+  "helpers": [
+    {
+      "qualname": "rutf8.unichr_as_utf8",
+      "source": "rpython/rlib/rutf8.py",
+      "precondition": "argument must be <= 0x10FFFF and, unless allow_surrogates=True is passed, not a surrogate (0xD800-0xDFFF)",
+      "confirmed_bug": "struct.unpack('u', b'abcd') -- pypy/module/struct/formatiterator.py's append_utf8 passes r_uint(value) straight through with no range check at all",
+      "guard_pattern_hints": [
+        "0x10FFFF",
+        "0x110000",
+        "1114111"
+      ]
+    },
+    {
+      "qualname": "rbigint.tobytes",
+      "source": "rpython/rlib/rbigint.py",
+      "precondition": "the 'signed' argument must actually match whether the bigint's value is negative -- passing signed=False (or leaving a stale/attacker-controlled state) for a negative value raises an internal OverflowError-shaped RPython exception, not the app-level OverflowError CPython raises",
+      "confirmed_bug": "codecs.getincrementalencoder(<multibyte codec>)().setstate(-1) -- the state int is handed to rbigint.tobytes() with no sign check first",
+      "guard_pattern_hints": [
+        "< 0",
+        ">= 0",
+        ".sign"
+      ]
+    },
+    {
+      "qualname": "rbigint.tobytes_int",
+      "source": "rpython/rlib/rbigint.py",
+      "precondition": "same as rbigint.tobytes -- module-level variant taking a plain int rather than an rbigint instance",
+      "confirmed_bug": "same underlying shape as rbigint.tobytes; not itself the confirmed call site but sharing the same precondition",
+      "guard_pattern_hints": [
+        "< 0",
+        ">= 0"
+      ]
+    }
+  ]
+}
