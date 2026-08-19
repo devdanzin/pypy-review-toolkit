@@ -102,6 +102,96 @@ def _calls_guard(method: ast.FunctionDef) -> bool:
     return False
 
 
+def _is_staticmethod(method: ast.FunctionDef) -> bool:
+    """Return whether *method* is declared with @staticmethod."""
+    return any(
+        isinstance(dec, ast.Name) and dec.id == "staticmethod"
+        for dec in method.decorator_list
+    )
+
+
+def _is_close_method(method: ast.FunctionDef) -> bool:
+    """Return whether *method* is an exposed close operation."""
+    return method.name in {"close", "close_w"}
+
+
+def _calls_guarded_helper(
+    method: ast.FunctionDef,
+    methods: dict[str, ast.FunctionDef],
+    seen: set[str] | None = None,
+) -> bool:
+    """Return whether *method* calls a helper that eventually calls a guard."""
+    if seen is None:
+        seen = set()
+
+    if method.name in seen:
+        return False
+    seen.add(method.name)
+
+    for sub in ast.walk(method):
+        if not isinstance(sub, ast.Call):
+            continue
+
+        func = sub.func
+        if not (
+            isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "self"
+        ):
+            continue
+
+        called_name = func.attr
+
+        if called_name.startswith("_check_"):
+            return True
+
+        helper = methods.get(called_name)
+        if helper is not None and _calls_guarded_helper(helper, methods, seen):
+            return True
+
+    return False
+
+
+def _calls_view_method(method: ast.FunctionDef) -> bool:
+    """Return whether *method* delegates directly to self.view."""
+    for sub in ast.walk(method):
+        if not isinstance(sub, ast.Call):
+            continue
+
+        func = sub.func
+        if (
+            isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Attribute)
+            and isinstance(func.value.value, ast.Name)
+            and func.value.value.id == "self"
+            and func.value.attr == "view"
+        ):
+            return True
+
+    return False
+
+
+def _calls_guarded_method(
+    method: ast.FunctionDef,
+    guarded_names: set[str],
+) -> bool:
+    """Return whether *method* directly calls a guarded sibling method."""
+    for sub in ast.walk(method):
+        if not isinstance(sub, ast.Call):
+            continue
+
+        func = sub.func
+        if (
+            isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "self"
+            and func.attr in guarded_names
+        ):
+            return True
+
+    return False
+
+
 def _check_file(path: Path, project_root: Path) -> list[dict]:
     result = parse_rpython_file(path)
     if result.parser != "ast" or result.ast_tree is None:
@@ -136,6 +226,17 @@ def _check_file(path: Path, project_root: Path) -> list[dict]:
                 # descr_init/__init__ legitimately don't need a guard --
                 # there's nothing to be detached/closed/invalid yet.
                 continue
+
+            if _is_staticmethod(method):
+                # Static methods have no instance self and therefore cannot follow
+                # the class's self._check_* guard convention.
+                continue
+
+            if _is_close_method(method):
+                # Closing is intentionally allowed on an already-closed object and
+                # therefore does not follow the self._check_* guard convention.
+                continue
+
             if _calls_guard(method):
                 guarded_exposed.append(name)
             else:
@@ -165,7 +266,18 @@ def _check_file(path: Path, project_root: Path) -> list[dict]:
             # class barely uses the pattern at all" (W_IOBase: 5/20, ~25%).
             continue
 
+        guarded_names = set(guarded_exposed)
+
         for method in unguarded_exposed:
+            if _calls_guarded_method(method, guarded_names):
+                continue
+
+            if _calls_guarded_helper(method, class_methods):
+                continue
+
+            if _calls_view_method(method):
+                continue
+
             findings.append(
                 _finding(
                     "sibling-guard-missing",

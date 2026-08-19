@@ -54,6 +54,145 @@ def test_missing_guard_is_flagged_when_convention_established(tmp_path):
     assert "_dealloc_warn_w" in findings[0]["message"]
 
 
+def test_no_finding_when_method_delegates_to_guarded_sibling(tmp_path):
+    # A method can inherit the guard convention indirectly by delegating
+    # directly to another exposed method that performs the guard.
+    src = """
+        class W_Wrapper(object):
+            def read_w(self, space):
+                self._check_closed(space)
+                return self.buf
+
+            def read1_w(self, space):
+                return self.read_w(space)
+
+            def write_w(self, space, data):
+                self._check_closed(space)
+                self.buf = data
+
+        W_Wrapper.typedef = TypeDef(
+            "Wrapper",
+            read = interp2app(W_Wrapper.read_w),
+            read1 = interp2app(W_Wrapper.read1_w),
+            write = interp2app(W_Wrapper.write_w),
+        )
+    """
+    f = _write(tmp_path, src)
+    findings = _check_file(f, tmp_path)
+    assert findings == []
+
+
+def test_no_finding_when_method_delegates_through_guarded_helper(tmp_path):
+    src = """
+        class W_Wrapper(object):
+            def _decode(self, space, data):
+                self._check_closed(space)
+                return data
+
+            def read_w(self, space):
+                self._check_closed(space)
+                return self.buf
+
+            def write_w(self, space, data):
+                return self._decode(space, data)
+
+            def flush_w(self, space):
+                self._check_closed(space)
+
+        W_Wrapper.typedef = TypeDef(
+            "Wrapper",
+            read = interp2app(W_Wrapper.read_w),
+            write = interp2app(W_Wrapper.write_w),
+            flush = interp2app(W_Wrapper.flush_w),
+        )
+    """
+    f = _write(tmp_path, src)
+    findings = _check_file(f, tmp_path)
+    assert findings == []
+
+
+def test_no_finding_when_method_delegates_to_view(tmp_path):
+    src = """
+        class W_MemoryView(object):
+            def descr_getitem(self, space, w_index):
+                return self.view.w_getitem(space, w_index)
+
+            def descr_len(self, space):
+                self._check_released(space)
+                return self.view.getlength()
+
+            def descr_tobytes(self, space):
+                self._check_released(space)
+                return self.view.as_str()
+
+        W_MemoryView.typedef = TypeDef(
+            "memoryview",
+            __getitem__ = interp2app(W_MemoryView.descr_getitem),
+            __len__ = interp2app(W_MemoryView.descr_len),
+            tobytes = interp2app(W_MemoryView.descr_tobytes),
+        )
+    """
+    f = _write(tmp_path, src)
+    findings = _check_file(f, tmp_path)
+    assert findings == []
+
+
+def test_staticmethod_is_not_flagged(tmp_path):
+    src = """
+        class W_MemoryView(object):
+            @staticmethod
+            def descr_new(space, w_obj):
+                return w_obj
+
+            def read_w(self, space):
+                self._check_released(space)
+                return self.buf
+
+            def write_w(self, space, data):
+                self._check_released(space)
+                self.buf = data
+
+        W_MemoryView.typedef = TypeDef(
+            "memoryview",
+            __new__ = interp2app(W_MemoryView.descr_new),
+            read = interp2app(W_MemoryView.read_w),
+            write = interp2app(W_MemoryView.write_w),
+        )
+    """
+    f = _write(tmp_path, src)
+    findings = _check_file(f, tmp_path)
+    assert findings == []
+
+
+def test_close_methods_are_not_flagged(tmp_path):
+    src = """
+        class W_Wrapper(object):
+            def read_w(self, space):
+                self._check_closed(space)
+                return self.buf
+
+            def write_w(self, space, data):
+                self._check_closed(space)
+                self.buf = data
+
+            def close_w(self, space):
+                self.state = CLOSED
+
+            def close(self):
+                self.state = CLOSED
+
+        W_Wrapper.typedef = TypeDef(
+            "Wrapper",
+            read = interp2app(W_Wrapper.read_w),
+            write = interp2app(W_Wrapper.write_w),
+            close = interp2app(W_Wrapper.close_w),
+        )
+    """
+    f = _write(tmp_path, src)
+    findings = _check_file(f, tmp_path)
+    assert findings == []
+
+
 def test_no_findings_when_convention_not_established(tmp_path):
     # W_IOBase shape: minority of methods use a guard -- not a real
     # convention to deviate from.
