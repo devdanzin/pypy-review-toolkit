@@ -125,6 +125,86 @@ def _mentions_jit_promote(func_node: ast.FunctionDef) -> bool:
     return False
 
 
+def _is_lazy_initialized_field(
+    class_node: ast.ClassDef,
+    field: str,
+    mutating_methods: list[str],
+) -> bool:
+    """Return whether *field* looks deliberately lazy-initialized.
+
+    Recognizes the PyPy pattern where an immutable field starts with a
+    null/uninitialized value in __init__, is populated by a later setup
+    method, and is checked for that null value elsewhere in the same class
+    before use.
+
+    The field remains surfaced because the declaration still deserves human
+    review, but this shape is weaker evidence of an accidental immutability
+    violation than arbitrary mid-lifetime mutation.
+    """
+    init_method = next(
+        (
+            item
+            for item in class_node.body
+            if isinstance(item, ast.FunctionDef) and item.name == "__init__"
+        ),
+        None,
+    )
+    if init_method is None:
+        return False
+
+    initialized_to_null = False
+
+    for node in ast.walk(init_method):
+        if not isinstance(node, ast.Assign):
+            continue
+
+        for target in node.targets:
+            if not (
+                isinstance(target, ast.Attribute)
+                and isinstance(target.value, ast.Name)
+                and target.value.id == "self"
+                and target.attr == field
+            ):
+                continue
+
+            value = node.value
+
+            if isinstance(value, ast.Constant) and value.value is None:
+                initialized_to_null = True
+            elif isinstance(value, ast.Call):
+                func = value.func
+                if (
+                    isinstance(func, ast.Attribute)
+                    and func.attr == "nullptr"
+                ):
+                    initialized_to_null = True
+
+    if not initialized_to_null:
+        return False
+
+    # The null check may live in a different method from the method that
+    # performs the lazy assignment. CPPMethod.cif_descr is the real example:
+    # _rawallocate() assigns the field, while do_fast_call() checks it.
+    for item in class_node.body:
+        if not isinstance(item, ast.FunctionDef):
+            continue
+
+        for node in ast.walk(item):
+            if not isinstance(node, ast.If):
+                continue
+
+            test = node.test
+            source = ast.dump(test)
+
+            if field not in source:
+                continue
+
+            if "nullptr" in source or "Constant(value=None)" in source:
+                return True
+
+    return False
+
+
 def _check_file(path: Path, project_root: Path) -> list[dict]:
     result = parse_rpython_file(path)
     if result.parser != "ast" or result.ast_tree is None:
@@ -181,6 +261,11 @@ def _check_file(path: Path, project_root: Path) -> list[dict]:
 
         for field, method_names in mutating_methods.items():
             only_del = method_names == ["__del__"]
+            is_lazy_init = _is_lazy_initialized_field(
+                node,
+                field,
+                method_names,
+            )
 
             if only_del:
                 findings.append(
@@ -193,6 +278,21 @@ def _check_file(path: Path, project_root: Path) -> list[dict]:
                         f"inside __del__ -- cleanup-time reassignment, lower priority than "
                         f"mid-lifetime mutation since a finalizing object generally isn't "
                         f"still being actively JIT-traced",
+                        f"reassigned in: {', '.join(method_names)}",
+                    )
+                )
+            elif is_lazy_init:
+                findings.append(
+                    _finding(
+                        "immutability-contract-mismatch-lazy-init",
+                        "CONSIDER",
+                        "medium",
+                        imm_decl_node or node,
+                        f"{node.name}.{field} is declared fully immutable but "
+                        f"appears to be lazily initialized after construction; "
+                        f"the field starts null/uninitialized and is populated "
+                        f"later behind an initialization guard. Verify that the "
+                        f"field is not changed after its setup phase",
                         f"reassigned in: {', '.join(method_names)}",
                     )
                 )
@@ -225,6 +325,8 @@ def _check_file(path: Path, project_root: Path) -> list[dict]:
                         f"reassigned in: {', '.join(method_names)}",
                     )
                 )
+
+    findings = deduplicate_findings(findings)
 
     for f in findings:
         f["file"] = rel
