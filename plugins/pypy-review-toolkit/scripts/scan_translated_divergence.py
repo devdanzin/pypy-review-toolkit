@@ -96,25 +96,80 @@ def _arm_shape(body: list[ast.stmt]) -> dict:
     }
 
 
-def _classify_two_arm(if_body: list[ast.stmt], else_body: list[ast.stmt]) -> tuple[str, str]:
+def _is_translation_boundary_arm(body: list[ast.stmt]) -> bool:
+    """Return whether an arm looks like an intentional translation boundary.
+
+    PyPy deliberately uses different implementations for some
+    we_are_translated() branches. Common examples include:
+
+    - low-level ``llop`` operations used only by translated code;
+    - ``AssertGreenFailed``-style Python-side test behavior;
+    - explicitly non-translatable helper calls;
+    - untranslated emulation helpers.
+
+    These are legitimate translated/untranslated implementation boundaries,
+    not evidence of an accidental control-flow mismatch.
+    """
+    call_names = _call_names_in(body)
+
+    if "llop" in call_names:
+        return True
+
+    for node in ast.walk(ast.Module(body=body, type_ignores=[])):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Attribute):
+                if func.attr in {
+                    "debug_fatalerror",
+                    "debug_print_traceback",
+                    "gc_fq_register",
+                }:
+                    return True
+
+        if isinstance(node, ast.Name):
+            if node.id in {
+                "AssertGreenFailed",
+                "ContinueRunningNormally",
+            }:
+                return True
+
+        if isinstance(node, ast.Attribute):
+            if node.attr in {
+                "_nontranslated_run_directly",
+            }:
+                return True
+
+    return False
+
+
+def _classify_two_arm(
+    if_body: list[ast.stmt],
+    else_body: list[ast.stmt],
+) -> tuple[str, str]:
     """Return (classification, reason) for a two-arm we_are_translated() site.
 
     - FIX: the arms' control-flow shape is observably inconsistent (one
-      returns/raises, the other doesn't) -- design doc §5's highest-confidence
-      class for this checker.
+      returns/raises, the other doesn't), unless the difference is explained
+      by a recognized translation-boundary implementation.
     - CONSIDER: both arms call different substantive (non-low-signal)
-      functions -- the rgil.py emulation-shim shape. Real, often deliberate,
-      but worth a human's look at reachability/intent, same posture the
-      design doc gives this class.
+      functions -- a real difference that may be deliberate.
     - POLICY: everything else with two arms -- e.g. both arms only touch
-      low-signal names, or the arms look structurally similar. Still
-      surfaced (it's real divergence), but at the family's "default here
-      unless clearly inconsistent" posture from design doc §5.
+      low-signal names, or the arms look structurally similar.
     """
     if_shape = _arm_shape(if_body)
     else_shape = _arm_shape(else_body)
 
     if if_shape["has_return_or_raise"] != else_shape["has_return_or_raise"]:
+        if _is_translation_boundary_arm(if_body) or _is_translation_boundary_arm(
+            else_body
+        ):
+            return (
+                "CONSIDER",
+                "arms have inconsistent return/raise control-flow shape, "
+                "but one arm matches a recognized translation-boundary pattern; "
+                "verify that the alternate implementation is intentional",
+            )
+
         return "FIX", "arms have inconsistent return/raise control-flow shape"
 
     if if_shape["substantive_calls"] and else_shape["substantive_calls"]:
