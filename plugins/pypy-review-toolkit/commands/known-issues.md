@@ -12,20 +12,27 @@ Cross-reference current scanner output against `data/pypy_known_bugs.tsv`.
 
 ## Status
 
-`data/pypy_known_bugs.tsv` is seeded **empty**. Unlike `cpython-review-toolkit`'s
-`cpython_known_bugs.tsv` (seeded from real fusil OOM/TSan findings) and
-`rustpy-review-toolkit`'s `known_panics.tsv` (seeded from a fuzzing campaign),
-this toolkit has no PyPy-specific fuzzing corpus yet. The schema exists so this
-command has somewhere to grow into once fusil-on-PyPy (running in parallel,
-per danzin) produces confirmed instances.
+`data/pypy_known_bugs.tsv` holds **14 fusil-confirmed bugs**
+(`PYPY-FUZZ-001..014`), all reproduced on PyPy 7.3.23 (`194f9f44b505`) with
+CPython 3.14.3 as the differential oracle. The full catalog -- reduced
+reproducers, captured evidence from both interpreters, and per-finding analysis
+-- lives in [`pypy-findings`](https://github.com/devdanzin/pypy-findings).
+
+Four of the fourteen (`006`, `007`, `009`, `010`) need the process near an
+address-space limit and are invisible without one; three (`001`, `008`, `009`)
+are not statically checkable from RPython source at all, and are recorded for
+known-issues tracking rather than as scanner targets. The ones this toolkit's
+scanners CAN see are the sibling-guard shapes -- `005`, `011`, `013`, `014` --
+which are four instances of one defect: a member that skips an invalidation or
+initialization guard its siblings all apply.
 
 ## Workflow
 
 1. Run all four scanners.
-2. Load `data/pypy_known_bugs.tsv`. If empty, say so plainly and report that
-   this command currently only has a schema, not a seeded catalog — don't
-   silently produce an empty "no known issues" result that reads as a clean
-   bill of health.
+2. Load `data/pypy_known_bugs.tsv`. Several rows are deliberately not
+   scanner-visible (`file` is `n/a` or names a C-generated parser): report
+   those as tracked-but-unscannable rather than as absent, so an empty scanner
+   match never reads as a clean bill of health.
 3. For each catalog entry (once seeded): check whether the corresponding
    scanner still finds it (`present`), whether the file/line has drifted
    (`line_drifted`), whether the containing function is gone
