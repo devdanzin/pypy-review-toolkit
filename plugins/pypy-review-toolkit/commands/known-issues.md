@@ -12,13 +12,13 @@ Cross-reference current scanner output against `data/pypy_known_bugs.tsv`.
 
 ## Status
 
-`data/pypy_known_bugs.tsv` holds **14 fusil-confirmed bugs**
-(`PYPY-FUZZ-001..014`), all reproduced on PyPy 7.3.23 (`194f9f44b505`) with
+`data/pypy_known_bugs.tsv` holds **15 fusil-confirmed bugs**
+(`PYPY-FUZZ-001..015`), all reproduced on PyPy 7.3.23 (`194f9f44b505`) with
 CPython 3.14.3 as the differential oracle. The full catalog -- reduced
 reproducers, captured evidence from both interpreters, and per-finding analysis
 -- lives in [`pypy-findings`](https://github.com/devdanzin/pypy-findings).
 
-Four of the fourteen (`006`, `007`, `009`, `010`) need the process near an
+Four of the fifteen (`006`, `007`, `009`, `010`) need the process near an
 address-space limit and are invisible without one; three (`001`, `008`, `009`)
 are not statically checkable from RPython source at all, and are recorded for
 known-issues tracking rather than as scanner targets. The ones this toolkit's

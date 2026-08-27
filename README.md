@@ -44,8 +44,8 @@ backing script), `git-history-analyzer`.
 
 **Data** (`plugins/pypy-review-toolkit/data/`): `pypy_non_bugs.md` (seeded
 with every real false-positive pattern found during validation),
-`jit_hint_contracts.json`, `pypy_known_bugs.tsv` (14 fusil-confirmed bugs,
-`PYPY-FUZZ-001..014`; full catalog in
+`jit_hint_contracts.json`, `pypy_known_bugs.tsv` (15 fusil-confirmed bugs,
+`PYPY-FUZZ-001..015`; full catalog in
 [`pypy-findings`](https://github.com/devdanzin/pypy-findings)).
 
 **35 tests passing**, including regression fixtures for every real bug
