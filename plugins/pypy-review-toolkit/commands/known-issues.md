@@ -12,8 +12,8 @@ Cross-reference current scanner output against `data/pypy_known_bugs.tsv`.
 
 ## Status
 
-`data/pypy_known_bugs.tsv` holds **15 fusil-confirmed bugs**
-(`PYPY-FUZZ-001..015`), all reproduced on PyPy 7.3.23 (`194f9f44b505`) with
+`data/pypy_known_bugs.tsv` holds **16 fusil-confirmed bugs**
+(`PYPY-FUZZ-001..016`), all reproduced on PyPy 7.3.23 (`194f9f44b505`) with
 CPython 3.14.3 as the differential oracle. The full catalog -- reduced
 reproducers, captured evidence from both interpreters, and per-finding analysis
 -- lives in [`pypy-findings`](https://github.com/devdanzin/pypy-findings).
